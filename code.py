@@ -4,7 +4,7 @@ import re
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from mode import db, Restaurant, Category, Dish, Order, OrderItem
+from models import db, Restaurant, Category, Dish, Order, OrderItem
 from datetime import datetime, date
 
 app = Flask(__name__)
@@ -70,7 +70,7 @@ def upload_to_cloudinary(image_data_url):
     mime_match = re.match(r"data:(image/[^;]+);", header)
     mime_type = mime_match.group(1) if mime_match else "image/jpeg"
 
-    # ✅ URL sans espaces
+    # ✅ URL SANS ESPACES
     upload_url = f"https://api.cloudinary.com/v1_1/{CLOUD_NAME}/image/upload"
     files = {"file": (f"menu_item.{mime_type.split('/')[1]}", encoded, mime_type)}
     data = {"upload_preset": "auto"}
