@@ -4,7 +4,7 @@ import re
 import requests  # Ajouté pour Cloudinary
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from models import db, Restaurant, Category, Dish, Order, OrderItem
+from mode import db, Restaurant, Category, Dish, Order, OrderItem
 from datetime import datetime, date
 
 app = Flask(__name__)
