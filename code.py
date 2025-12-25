@@ -164,6 +164,7 @@ def add_dish(public_id):
     category_name = data.get('category')
     price_str = data.get('price')
     image_b64 = data.get('image_data')
+    image_url = data.get('image_url')  # ✅ Nouveau champ
 
     if not all([name, desc, category_name, price_str]):
         return jsonify({'error': 'Champs manquants'}), 400
@@ -175,16 +176,19 @@ def add_dish(public_id):
 
     category = get_or_create_category(restaurant.id, category_name)
 
-    image_url = None
-    if image_b64 and image_b64.startswith("data:image"):
-        image_url = upload_to_cloudinary(image_b64)
+    # ✅ Priorité à image_url
+    final_image_url = None
+    if image_url:
+        final_image_url = image_url
+    elif image_b64 and image_b64.startswith("data:image"):
+        final_image_url = upload_to_cloudinary(image_b64)
 
     dish = Dish(
         name=name,
         description=desc,
         price=price,
-        image_base64=image_b64 if not image_url else None,
-        image_url=image_url,
+        image_base64=image_b64 if not final_image_url else None,
+        image_url=final_image_url,
         category_id=category.id,
         restaurant_id=restaurant.id
     )
