@@ -53,16 +53,24 @@ def upload_to_cloudinary(image_data_url):
     API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
 
     if not all([CLOUD_NAME, API_KEY, API_SECRET]):
+        print("[WARNING] Cloudinary non configuré → upload désactivé")
         return None
 
+    # Vérifie le format
     if not image_data_url.startswith("data:image"):
+        print(f"[ERROR] Format invalide: {image_data_url[:50]}...")
         return None
-    header, encoded = image_data_url.split(",", 1)
+
+    try:
+        header, encoded = image_data_url.split(",", 1)
+    except ValueError:
+        print(f"[ERROR] Image mal formatée: {image_data_url[:50]}...")
+        return None
 
     mime_match = re.match(r"data:(image/[^;]+);", header)
     mime_type = mime_match.group(1) if mime_match else "image/jpeg"
 
-    # ✅ CORRIGÉ : suppression des espaces dans l’URL
+    # ✅ URL sans espaces
     upload_url = f"https://api.cloudinary.com/v1_1/{CLOUD_NAME}/image/upload"
     files = {"file": (f"menu_item.{mime_type.split('/')[1]}", encoded, mime_type)}
     data = {"upload_preset": "auto"}
@@ -76,10 +84,15 @@ def upload_to_cloudinary(image_data_url):
             timeout=10
         )
         if resp.status_code == 200:
-            return resp.json().get("secure_url")
-    except Exception:
-        pass
-    return None
+            url = resp.json().get("secure_url")
+            print(f"[SUCCESS] Upload réussi → {url}")
+            return url
+        else:
+            print(f"[ERROR] Cloudinary a retourné {resp.status_code}: {resp.text}")
+            return None
+    except Exception as e:
+        print(f"[ERROR] Erreur réseau: {str(e)}")
+        return None
 
 def serialize_order(order):
     """Sérialise une commande pour l'API."""
@@ -193,7 +206,6 @@ def get_pending_orders(public_id):
     restaurant = get_restaurant_by_public_id(public_id)
     orders = Order.query.filter_by(restaurant_id=restaurant.id, status='pending') \
         .order_by(Order.created_at.desc()).all()
-    # ✅ CORRIGÉ : pas de format_orders_for_staff → sérialisation directe
     return jsonify([serialize_order(order) for order in orders])
 
 @app.route('/api/orders/confirmed/<public_id>', methods=['GET'])
