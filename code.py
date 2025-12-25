@@ -4,7 +4,7 @@ import re
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from mode import db, Restaurant, Category, Dish, Order, OrderItem
+from models import db, Restaurant, Category, Dish, Order, OrderItem
 from datetime import datetime, date
 
 app = Flask(__name__)
@@ -53,20 +53,19 @@ def upload_to_cloudinary(image_data_url):
     API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
 
     if not all([CLOUD_NAME, API_KEY, API_SECRET]):
-        return None  # Cloudinary non configuré → fallback désactivé
+        return None
 
-    # Extraire les données après "image/...;base64,"
-    if not image_data_url.startswith("image"):
+    if not image_data_url.startswith("data:image"):
         return None
     header, encoded = image_data_url.split(",", 1)
 
-    # Déterminer le type MIME
     mime_match = re.match(r"data:(image/[^;]+);", header)
     mime_type = mime_match.group(1) if mime_match else "image/jpeg"
 
+    # ✅ CORRIGÉ : suppression des espaces dans l’URL
     upload_url = f"https://api.cloudinary.com/v1_1/{CLOUD_NAME}/image/upload"
     files = {"file": (f"menu_item.{mime_type.split('/')[1]}", encoded, mime_type)}
-    data = {"upload_preset": "auto"}  # ou un preset si tu en as un
+    data = {"upload_preset": "auto"}
 
     try:
         resp = requests.post(
@@ -81,6 +80,23 @@ def upload_to_cloudinary(image_data_url):
     except Exception:
         pass
     return None
+
+def serialize_order(order):
+    """Sérialise une commande pour l'API."""
+    return {
+        'id': order.id,
+        'table_number': order.table_number or 'À emporter',
+        'status': order.status,
+        'created_at': order.created_at.isoformat(),
+        'items': [{
+            'dish': {
+                'id': item.dish.id,
+                'name': item.dish.name,
+                'price': item.dish.price
+            },
+            'quantity': item.quantity
+        } for item in order.items]
+    }
 
 # === ROUTES ===
 @app.route('/api/register', methods=['POST'])
@@ -98,6 +114,7 @@ def register_restaurant():
     db.session.add(restaurant)
     db.session.commit()
 
+    # ✅ CORRIGÉ : suppression des espaces dans les URLs
     client_url_base = os.getenv("CLIENT_URL", "https://client.example.com").rstrip('/')
     staff_url_base = os.getenv("STAFF_URL", "https://staff.example.com").rstrip('/')
     client_url = f"{client_url_base}/?token={public_id}"
@@ -133,7 +150,7 @@ def add_dish(public_id):
     desc = data.get('description')
     category_name = data.get('category')
     price_str = data.get('price')
-    image_b64 = data.get('image_data')  # peut être base64 ou déjà une URL
+    image_b64 = data.get('image_data')
 
     if not all([name, desc, category_name, price_str]):
         return jsonify({'error': 'Champs manquants'}), 400
@@ -145,16 +162,15 @@ def add_dish(public_id):
 
     category = get_or_create_category(restaurant.id, category_name)
 
-    # Tentative d’upload vers Cloudinary
     image_url = None
-    if image_b64 and image_b64.startswith("image"):
+    if image_b64 and image_b64.startswith("data:image"):
         image_url = upload_to_cloudinary(image_b64)
 
     dish = Dish(
         name=name,
         description=desc,
         price=price,
-        image_base64=image_b64 if not image_url else None,  # garde base64 si upload échoue
+        image_base64=image_b64 if not image_url else None,
         image_url=image_url,
         category_id=category.id,
         restaurant_id=restaurant.id
@@ -171,13 +187,14 @@ def delete_dish(dish_id):
     db.session.commit()
     return jsonify({'success': True}), 200
 
-# --- Routes commandes/statistiques ---
+# --- Routes commandes ---
 @app.route('/api/orders/pending/<public_id>', methods=['GET'])
 def get_pending_orders(public_id):
     restaurant = get_restaurant_by_public_id(public_id)
     orders = Order.query.filter_by(restaurant_id=restaurant.id, status='pending') \
         .order_by(Order.created_at.desc()).all()
-    return jsonify(format_orders_for_staff(orders))
+    # ✅ CORRIGÉ : pas de format_orders_for_staff → sérialisation directe
+    return jsonify([serialize_order(order) for order in orders])
 
 @app.route('/api/orders/confirmed/<public_id>', methods=['GET'])
 def get_confirmed_orders(public_id):
@@ -186,7 +203,7 @@ def get_confirmed_orders(public_id):
         Order.restaurant_id == restaurant.id,
         Order.status.in_(['validated', 'completed'])
     ).order_by(Order.created_at.desc()).all()
-    return jsonify(format_orders_for_staff(orders))
+    return jsonify([serialize_order(order) for order in orders])
 
 @app.route('/api/order/<int:order_id>/confirm', methods=['POST'])
 def confirm_order(order_id):
@@ -228,11 +245,19 @@ def create_order_client(public_id):
     db.session.flush()
 
     for item in items:
-        dish = Dish.query.filter_by(id=item['id'], restaurant_id=restaurant.id).first()
+        dish_id = item.get('id')
+        quantity = item.get('quantity', 1)
+
+        if not dish_id or quantity < 1:
+            db.session.rollback()
+            return jsonify({'error': 'Données du plat invalides.'}), 400
+
+        dish = Dish.query.filter_by(id=dish_id, restaurant_id=restaurant.id).first()
         if not dish:
             db.session.rollback()
-            return jsonify({'error': f'Plat non trouvé: {item["id"]}'}, 400)
-        oi = OrderItem(order_id=order.id, dish_id=dish.id, quantity=1)
+            return jsonify({'error': f'Plat non trouvé: {dish_id}'}), 400
+
+        oi = OrderItem(order_id=order.id, dish_id=dish.id, quantity=quantity)
         db.session.add(oi)
 
     db.session.commit()
@@ -262,7 +287,6 @@ def debug_env():
 def index():
     return "Backend fonctionnel! Accédez aux endpoints via /api/..."
 
-# === Démarrage ===
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
