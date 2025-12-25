@@ -1,7 +1,7 @@
 import os
 import secrets
 import re
-import requests  # Ajouté pour Cloudinary
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from mode import db, Restaurant, Category, Dish, Order, OrderItem
@@ -19,7 +19,10 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key')
 
 # Initialisation de la base de données
+db.init_app(app)
 
+with app.app_context():
+    db.create_all()
 
 # === UTILITAIRES ===
 def generate_public_id():
@@ -52,8 +55,8 @@ def upload_to_cloudinary(image_data_url):
     if not all([CLOUD_NAME, API_KEY, API_SECRET]):
         return None  # Cloudinary non configuré → fallback désactivé
 
-    # Extraire les données après "data:image/...;base64,"
-    if not image_data_url.startswith("data:image"):
+    # Extraire les données après "image/...;base64,"
+    if not image_data_url.startswith("image"):
         return None
     header, encoded = image_data_url.split(",", 1)
 
@@ -119,7 +122,7 @@ def get_menu_flat(public_id):
         "description": dish.description or "Délicieux plat de notre maison.",
         "price": f"{dish.price} MAD",
         "category": category_name,
-        "image_url": dish.image_url or (dish.image_base64 if dish.image_base64 and not dish.image_url else "")
+        "image_url": dish.image_url or ""
     } for dish, category_name in dishes])
 
 @app.route('/api/menu/add/<public_id>', methods=['POST'])
@@ -144,7 +147,7 @@ def add_dish(public_id):
 
     # Tentative d’upload vers Cloudinary
     image_url = None
-    if image_b64 and image_b64.startswith("data:image"):
+    if image_b64 and image_b64.startswith("image"):
         image_url = upload_to_cloudinary(image_b64)
 
     dish = Dish(
@@ -168,7 +171,7 @@ def delete_dish(dish_id):
     db.session.commit()
     return jsonify({'success': True}), 200
 
-# --- Routes commandes/statistiques inchangées ---
+# --- Routes commandes/statistiques ---
 @app.route('/api/orders/pending/<public_id>', methods=['GET'])
 def get_pending_orders(public_id):
     restaurant = get_restaurant_by_public_id(public_id)
